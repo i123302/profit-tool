@@ -2,144 +2,128 @@ import streamlit as st
 import urllib.request
 import json
 
-# === 0. 页面基础设置 ===
-st.set_page_config(page_title="Naver 爆款侦察机", page_icon="🕵️", layout="wide")
+# === 페이지 설정 (页面设置) ===
+st.set_page_config(page_title="마켓 소싱 분석기", page_icon="🇰🇷", layout="wide")
 
-# === 1. 你的通行证 (API Key) ===
+# === API 설정 (API Key) ===
 client_id = "D7Y9yz2pKq4U7EgsGhIe"
 client_secret = "Uf8RGzI3jJ"
 
-# === 2. 侧边栏 (设置区) ===
+# === 사이드바 설정 (Sidebar) ===
 with st.sidebar:
-    st.header("⚙️ 环境设置")
-    exchange_rate = st.number_input("汇率 (1元 = ? 韩币)", value=195)
-    shipping_cost = st.number_input("单件运费 (韩币)", value=3000)
+    st.header("⚙️ 환경 설정 (Settings)")
+    exchange_rate = st.number_input("현재 환율 (1 RMB = ? KRW)", value=195)
+    shipping_cost = st.number_input("개당 예상 배송비 (KRW)", value=3000)
     st.divider()
-    st.info("💡 提示：Naver API 不直接提供销量/评价数，但我们会通过'店铺类型'帮你判断热度。")
+    st.info("💡 Tip: 1688 소싱 단가를 입력하면 마진율이 자동 계산됩니다.")
 
-# === 3. 主标题 ===
-st.title("🕵️ Naver 选品侦察机 V4.0")
-st.markdown("### 🔍 透视竞品：价格 · 利润 · 渠道 · 热度")
+# === 메인 타이틀 (Main Title) ===
+st.title("🇰🇷 이커머스 시장 분석 & 마진 계산기")
+st.markdown("### 🔍 경쟁사 가격/채널/마진 분석 (Naver & Coupang)")
 
-# === 4. 搜索输入区 ===
+# === 입력 섹션 (Input Section) ===
 with st.container():
     col1, col2, col3 = st.columns([3, 2, 1])
     with col1:
-        keyword = st.text_input("第一步: 输入韩语关键词", placeholder="例如: 기계식 키보드")
+        keyword = st.text_input("상품 키워드 (Keyword)", placeholder="예: 기계식 키보드")
     with col2:
-        cost_rmb = st.number_input("第二步: 1688进价 (RMB)", value=0)
+        cost_rmb = st.number_input("소싱 원가 (RMB/위안)", value=0)
     with col3:
         st.write("") 
         st.write("") 
-        btn_start = st.button("开始侦察 🚀", type="primary", use_container_width=True)
+        btn_start = st.button("분석 시작 (Start) 🚀", type="primary", use_container_width=True)
 
-# === 5. 核心分析逻辑 ===
+# === 핵심 로직 (Core Logic) ===
 if btn_start:
     if not keyword:
-        st.warning("⚠️ 请先输入关键词！")
+        st.warning("⚠️ 키워드를 입력해주세요! (Please enter a keyword)")
     else:
-        # 计算总成本
+        # 1. 원가 계산 (Cost Calculation)
         total_cost_krw = (cost_rmb * exchange_rate) + shipping_cost
-        
-        # 显示成本条
         if cost_rmb > 0:
-            st.success(f"📊 **成本红线**: {cost_rmb}元 × {exchange_rate} + 运费 = **{total_cost_krw:,.0f} 韩币**")
-        
+            st.success(f"📊 **원가 분석**: {cost_rmb}위안 × {exchange_rate} + 배송비 = **{total_cost_krw:,.0f} 원** (손익분기점)")
         st.divider()
 
-        # 调用 API
+        # 2. API 호출 (Call Naver API)
         encText = urllib.parse.quote(keyword)
-        # display=20, sort=sim (按热度/相关度排序，排前面的通常销量好)
-        url = "https://openapi.naver.com/v1/search/shop?query=" + encText + "&display=20&sort=sim"
-        
+        url = "https://openapi.naver.com/v1/search/shop?query=" + encText + "&display=30&sort=sim"
         request = urllib.request.Request(url)
         request.add_header("X-Naver-Client-Id", client_id)
         request.add_header("X-Naver-Client-Secret", client_secret)
         
         try:
-            with st.spinner('正在潜入 Naver 数据库...'):
+            with st.spinner('데이터 분석 중... (Analyzing data...)'):
                 response = urllib.request.urlopen(request)
                 data = json.loads(response.read().decode('utf-8'))
             
             if not data['items']:
-                st.error("❌ 没找到相关商品。")
+                st.error("❌ 검색 결과가 없습니다.")
             else:
                 for item in data['items']:
-                    # --- 数据清洗 ---
                     name = item['title'].replace('<b>', '').replace('</b>', '')
-                    lprice = int(item['lprice']) # 售价
-                    hprice = int(item['hprice']) if item['hprice'] else 0 # 原价
-                    
-                    brand = item.get('brand', '')
-                    maker = item.get('maker', '')
-                    mall_name = item.get('mallName', '未知店铺')
-                    product_type = item.get('productType', '1') # 1=一般, 2=比价聚合
-                    
-                    category = f"{item['category1']} > {item['category2']} > {item['category3']}"
-                    img_url = item['image']
+                    lprice = int(item['lprice'])
+                    mall_name = item['mallName']
                     link = item['link']
-
-                    # --- 利润计算 ---
+                    img_url = item['image']
+                    
+                    # 마진 계산 (Profit Calculation)
                     profit = lprice - total_cost_krw
-                    profit_rate = 0
-                    if lprice > 0:
-                        profit_rate = (profit / lprice) * 100
-
-                    # --- 智能热度判断 (虽然没销量数字，但能推测) ---
-                    # 逻辑：如果是'价格比较'链接，说明是全网爆款聚合，销量极高
-                    is_hot = False
-                    hot_label = ""
-                    if product_type == '1' or '가격비교' in link: 
-                        is_hot = True
-                        hot_label = "🔥 全网比价 (超级爆款)"
+                    profit_rate = (profit / lprice) * 100 if lprice > 0 else 0
+                    
+                    # === 플랫폼 식별 (Platform Detection) ===
+                    is_coupang = False
+                    if '쿠팡' in mall_name or 'Coupang' in mall_name:
+                        is_coupang = True
+                        mall_badge = "🚀 쿠팡 (Coupang)"
+                        badge_color = "#e60f0f" # Red
+                        bg_color = "#ffe6e6"
+                    elif '스마트스토어' in mall_name or 'SmartStore' in mall_name:
+                        mall_badge = "💚 스마트스토어"
+                        badge_color = "#03c75a" # Green
+                        bg_color = "#e6fff2"
                     else:
-                        hot_label = f"🏪 {mall_name}"
+                        mall_badge = f"🏪 {mall_name}"
+                        badge_color = "#555"
+                        bg_color = "#f0f2f6"
 
-                    # 过滤超低价配件
+                    # 액세서리 필터링 (Filter low price items)
                     if cost_rmb > 0 and lprice < (total_cost_krw * 0.4):
                         continue
 
-                    # === 界面展示 ===
+                    # === UI 디스플레이 (UI Display) ===
                     with st.container():
                         c1, c2 = st.columns([1, 3])
                         
-                        # 左侧：图片
+                        # 이미지 (Image)
                         with c1:
                             st.image(img_url, use_container_width=True)
-                            if is_hot:
-                                st.caption("🔥 流量之王")
                         
-                        # 右侧：详情
+                        # 상세 정보 (Details)
                         with c2:
-                            # 标题
                             st.markdown(f"### [{name}]({link})")
                             
-                            # 标签区 (新增：店铺和热度)
+                            # 배지 표시 (Badge)
                             st.markdown(f"""
-                            <span style='background-color:#e8fdf5; padding:4px 8px; border-radius:4px; color:#0d5e42'>**{hot_label}**</span>
-                            <span style='background-color:#f0f2f6; padding:4px 8px; border-radius:4px;'>🏷️ 品牌: {brand or '无'}</span> 
-                            <span style='background-color:#f0f2f6; padding:4px 8px; border-radius:4px;'>🏭 制造: {maker or 'OEM'}</span>
+                            <span style='background-color:{bg_color}; color:{badge_color}; padding:4px 8px; border-radius:4px; font-weight:bold; border:1px solid {badge_color}'>
+                            {mall_badge}
+                            </span>
                             """, unsafe_allow_html=True)
                             
-                            st.write("") # 空行
-
-                            # 价格数据区
-                            col_p1, col_p2, col_p3 = st.columns(3)
-                            with col_p1:
-                                st.metric("当前售价", f"₩{lprice:,}")
-                            with col_p2:
+                            st.write("")
+                            
+                            # 가격 및 마진 (Price & Profit)
+                            cp1, cp2 = st.columns(2)
+                            with cp1:
+                                st.metric("판매가 (Price)", f"₩{lprice:,}")
+                            with cp2:
                                 if cost_rmb > 0:
                                     if profit > 0:
-                                        st.metric("预估利润", f"₩{profit:,}", f"{profit_rate:.1f}%")
+                                        st.metric("예상 마진 (Profit)", f"₩{profit:,}", f"{profit_rate:.1f}%")
                                     else:
-                                        st.metric("预估利润", f"₩{profit:,}", f"{profit_rate:.1f}%", delta_color="inverse")
+                                        st.metric("예상 마진 (Profit)", f"₩{profit:,}", f"{profit_rate:.1f}%", delta_color="inverse")
                                 else:
-                                    st.metric("进价未填", "-")
-                            with col_p3:
-                                # 这里虽然没有评论数，但我们做一个按钮引导去查看
-                                st.link_button("🔎 去看真实评价", link)
-                            
+                                    st.metric("원가 미입력", "-")
                     st.divider()
 
         except Exception as e:
-            st.error(f"发生错误: {e}")
+            st.error(f"Error: {e}")
